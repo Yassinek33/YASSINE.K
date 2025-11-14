@@ -1,4 +1,6 @@
 
+
+
 import React from 'react';
 import { Message } from '../types';
 
@@ -7,13 +9,14 @@ interface ChatMessageProps {
 }
 
 // A markdown parser for the final report
-const FinalReportRenderer: React.FC<{ text: string; userUploadedImageUrls?: string[] }> = ({ text, userUploadedImageUrls }) => {
+const FinalReportRenderer: React.FC<{ text: string; userUploadedImageUrls?: string[]; groundingUrls?: {uri: string; title?: string}[] }> = ({ text, userUploadedImageUrls, groundingUrls }) => {
     const content = text.replace('[FINAL_REPORT]', '').trim();
     
     const renderContent = () => {
         let parts: React.ReactNode[] = [];
         let currentSection: string | null = null;
         let imageSectionHandled = false;
+        let sourcesSectionHandled = false; // Track if sources section has been added
 
         content.split('\n').forEach((line, index) => {
             const trimmedLine = line.trim();
@@ -38,6 +41,31 @@ const FinalReportRenderer: React.FC<{ text: string; userUploadedImageUrls?: stri
                         </div>
                     );
                     imageSectionHandled = true; // Ensure images are only added once
+                }
+                
+                // Insert sources right before "Conclusion" (or at the end if no conclusion)
+                if (currentSection === 'Conclusion : consulter un dermatologue' && groundingUrls && groundingUrls.length > 0 && !sourcesSectionHandled) {
+                    parts.push(
+                        <h3 key="h3-sources" className="text-xl md:text-2xl font-semibold text-slate-800 mt-6 mb-3 leading-tight">Sources d'information (Google Search)</h3>
+                    );
+                    parts.push(
+                        <ul key="grounding-urls" className="list-disc list-inside text-base leading-relaxed text-slate-700 space-y-1">
+                            {groundingUrls.map((source, sourceIndex) => (
+                                <li key={`source-${sourceIndex}`}>
+                                    <a 
+                                        href={source.uri} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer" 
+                                        className="text-emerald-600 hover:underline break-all"
+                                        title={source.title || source.uri}
+                                    >
+                                        {source.title || source.uri}
+                                    </a>
+                                </li>
+                            ))}
+                        </ul>
+                    );
+                    sourcesSectionHandled = true;
                 }
                 return;
             }
@@ -78,6 +106,30 @@ const FinalReportRenderer: React.FC<{ text: string; userUploadedImageUrls?: stri
             );
         }
 
+        // Fallback to ensure sources are displayed if "Conclusion" section isn't explicitly hit or is at the very end
+        if (groundingUrls && groundingUrls.length > 0 && !sourcesSectionHandled) {
+            parts.push(
+                <h3 key="h3-sources-fallback" className="text-xl md:text-2xl font-semibold text-slate-800 mt-6 mb-3 leading-tight">Sources d'information (Google Search)</h3>
+            );
+            parts.push(
+                <ul key="grounding-urls-fallback" className="list-disc list-inside text-base leading-relaxed text-slate-700 space-y-1">
+                    {groundingUrls.map((source, sourceIndex) => (
+                        <li key={`source-fallback-${sourceIndex}`}>
+                            <a 
+                                href={source.uri} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-emerald-600 hover:underline break-all"
+                                title={source.title || source.uri}
+                            >
+                                {source.title || source.uri}
+                            </a>
+                        </li>
+                    ))}
+                </ul>
+            );
+        }
+
         return parts;
     };
 
@@ -92,7 +144,7 @@ const FinalReportRenderer: React.FC<{ text: string; userUploadedImageUrls?: stri
 const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     // This component is now primarily for displaying the final report in the new QCM-style UI.
     if (message.isFinalReport) {
-        return <FinalReportRenderer text={message.text} userUploadedImageUrls={message.userUploadedImageUrls} />;
+        return <FinalReportRenderer text={message.text} userUploadedImageUrls={message.userUploadedImageUrls} groundingUrls={message.groundingUrls} />;
     }
 
     // Return null for any other message type as they are not displayed in a chat format anymore.

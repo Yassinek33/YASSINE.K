@@ -17,6 +17,7 @@ export interface Message {
   ageDropdownMax?: number; // New: max age for dropdown
   hasNoneButton?: boolean; // New: indicates if a dedicated "None" button should be shown
   noneButtonText?: string; // New: text for the dedicated "None" button
+  groundingUrls?: {uri: string; title?: string}[]; // New: Added for displaying Google Search grounding URLs in final report
   // isQuestionForVideoAnalysis?: boolean; // Removed: indicates if AI is asking a question about an uploaded video
 }
 

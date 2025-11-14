@@ -1,8 +1,11 @@
 
+
+
 import React, { useState, useMemo } from 'react';
 import { sortedCountries } from './CountryDropdown'; // Reusing for manual search block
 import { BackArrowIcon } from './icons';
 import { GenerateContentResponse, GroundingChunk, LatLng } from '@google/genai';
+import DermatologistCard from './DermatologistCard'; // Import the new DermatologistCard
 
 // --- Types and Interfaces ---
 
@@ -19,6 +22,25 @@ interface MapsPlaceInfo {
     website_uri?: string; // Snake case fallback
     website?: string; // Simple fallback
     placeAnswerSources?: MapsPlaceAnswerSource[];
+    geometry?: { // Added for coordinate extraction
+        location: {
+            lat: number;
+            lng: number;
+        }
+    };
+    latitude?: number; // Direct latitude fallback
+    longitude?: number; // Direct longitude fallback
+    center?: { // Center for specific cases
+        latitude: number;
+        longitude: number;
+    };
+    vicinity?: string; // Additional address fallback
+    address?: string; // Additional address fallback
+    phone_number?: string; // Additional phone fallback
+    url?: string; // Additional website fallback
+    email?: string; // Additional email fallback
+    business_email?: string; // Additional email fallback
+    contact_email?: string; // Additional email fallback
 }
 
 interface MapsReviewSnippet {
@@ -30,17 +52,7 @@ interface MapsPlaceAnswerSource {
     reviewSnippets?: MapsReviewSnippet[];
 }
 
-interface DermatologistListPageProps {
-    dermatologistMapResults: GenerateContentResponse | null;
-    onBack: () => void;
-    searchQuery: { country: string; city: string; };
-    isLoading: boolean;
-    error: string | null;
-    onSearch: (country: string, city: string, userLatLng?: LatLng | null) => Promise<void>;
-    lastSearchLocation?: LatLng | null;
-}
-
-interface DisplayableDermatologist {
+export interface DisplayableDermatologist { // Exported for DermatologistCard
     name: string;
     address?: string;
     phone?: string;
@@ -49,8 +61,19 @@ interface DisplayableDermatologist {
     email?: string;
     reviewSnippets?: MapsReviewSnippet[];
     distance?: number; // Distance in km
-    lat?: number;
-    lng?: number;
+    lat?: number; // Add lat
+    lng?: number; // Add lng
+}
+
+// Fix: Define DermatologistListPageProps interface
+interface DermatologistListPageProps {
+    dermatologistMapResults: GenerateContentResponse | null;
+    onBack: () => void;
+    searchQuery: { country: string; city: string };
+    isLoading: boolean;
+    error: string | null;
+    onSearch: (country: string, city: string, userLatLng?: LatLng | null) => Promise<void>;
+    lastSearchLocation: LatLng | null;
 }
 
 // --- Utils ---
@@ -310,7 +333,7 @@ const DermatologistListPage: React.FC<DermatologistListPageProps> = ({
     const handleGeoSearch = async () => {
         setGeoError(null);
         if (!navigator.geolocation) {
-            setGeoError("La géolocalisation n'est pas supportée.");
+            setGeoError("La géolocalisation n'est pas supportée par votre navigateur.");
             return;
         }
         navigator.geolocation.getCurrentPosition(
@@ -454,84 +477,12 @@ const DermatologistListPage: React.FC<DermatologistListPageProps> = ({
                         </h3>
                     </div>
                    
-                    {displayableDermatologists.map((derm, index) => (
-                        <div key={index} className="bg-white p-6 rounded-[16px] shadow-md border border-gray-100 transition-shadow hover:shadow-lg flex flex-col gap-3 animate-fade-in">
-                            {/* Header: Name */}
-                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                                <h4 className="font-['Poppins'] font-semibold text-lg md:text-xl" style={{ color: '#00B37E' }}>
-                                    {derm.name}
-                                </h4>
-                            </div>
-                            
-                            {/* Content Block */}
-                            <div className="font-['Inter'] text-sm md:text-base space-y-2 text-[#0A2840]">
-                                
-                                {/* Address and Distance */}
-                                {(derm.address || derm.distance !== undefined) && (
-                                    <div className="flex flex-col gap-1">
-                                         {derm.address && (
-                                            <p className="leading-relaxed flex gap-2 items-start">
-                                                <span className="font-medium min-w-[24px] text-slate-500">📍</span>
-                                                <span>{derm.address}</span>
-                                            </p>
-                                         )}
-                                         {derm.distance !== undefined && (
-                                            <p className="text-sm font-bold text-emerald-700 ml-8">
-                                                📍 à {derm.distance} km
-                                            </p>
-                                         )}
-                                    </div>
-                                )}
-                                
-                                {derm.phone && (
-                                    <p className="leading-relaxed flex gap-2 items-center">
-                                        <span className="font-medium min-w-[24px] text-slate-500">📞</span> 
-                                        <a href={`tel:${derm.phone.replace(/[^\d+]/g, '')}`} className="hover:text-[#00B37E] font-medium transition-colors">
-                                            {derm.phone}
-                                        </a>
-                                    </p>
-                                )}
-                                
-                                {derm.website && (
-                                    <p className="leading-relaxed flex gap-2 items-center">
-                                         <span className="font-medium min-w-[24px] text-slate-500">🌐</span>
-                                         <a 
-                                            href={derm.website} 
-                                            target="_blank" 
-                                            rel="noopener noreferrer" 
-                                            className="text-[#0066CC] hover:underline truncate block max-w-full"
-                                        >
-                                            {derm.website.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]}
-                                        </a>
-                                    </p>
-                                )}
-
-                                {derm.email && (
-                                    <p className="leading-relaxed flex gap-2 items-center">
-                                        <span className="font-medium min-w-[24px] text-slate-500">✉️</span> 
-                                        <a href={`mailto:${derm.email}`} className="text-[#0066CC] hover:underline break-all">
-                                            {derm.email}
-                                        </a>
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Footer: Link */}
-                            <div className="mt-3 pt-3 border-t border-gray-50 flex items-center justify-end">
-                                <a 
-                                    href={derm.uri} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
-                                    className="inline-flex items-center gap-2 bg-gray-100 text-slate-700 hover:bg-[#00B37E] hover:text-white px-4 py-2 rounded-full font-['Inter'] font-medium text-sm transition-colors duration-200"
-                                >
-                                    Voir sur Google Maps
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                </a>
-                            </div>
-                        </div>
-                    ))}
+                    {/* Grid for dermatologist cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {displayableDermatologists.map((derm, index) => (
+                            <DermatologistCard key={derm.uri || index} dermatologist={derm} />
+                        ))}
+                    </div>
                 </div>
             );
         }
@@ -565,7 +516,7 @@ const DermatologistListPage: React.FC<DermatologistListPageProps> = ({
                     <button
                         onClick={handleGeoSearch}
                         disabled={isLoading}
-                        className="w-full px-4 py-2.5 bg-white border border-[#00B37E] text-[#00B37E] hover:bg-[#00B37E] hover:text-white rounded-full transition-all duration-200 font-bold text-sm font-['Poppins']"
+                        className="w-full px-4 py-2.5 bg-white border border-[#00B37E] text-[#00B37E] hover:bg-[#00B37E] hover:text{window.aiStudioTheme.darkGreen} rounded-full transition-all duration-200 font-bold text-sm font-['Poppins']"
                     >
                         Trouver les proches
                     </button>

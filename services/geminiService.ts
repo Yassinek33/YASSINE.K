@@ -1,4 +1,5 @@
-import { GoogleGenAI, Tool, ToolConfig, RetrievalConfig, LatLng, GenerateContentResponse } from "@google/genai";
+
+import { GoogleGenAI, Tool, ToolConfig, RetrievalConfig, LatLng, GenerateContentResponse as GeminiGenerateContentResponse } from "@google/genai";
 import { getSystemInstruction } from '../constants'; // Import the function
 import { GeminiContent, GeminiImagePart, GeminiTextPart } from '../types'; // Removed GeminiVideoPart
 
@@ -41,7 +42,7 @@ export const generateResponse = async (
     history: GeminiContent[],
     newUserText: string,
     imageFiles?: File[] | null
-): Promise<string> => {
+): Promise<{text: string; groundingUrls?: {uri: string; title?: string}[]}> => {
 
     const aiClient = getGeminiClient(); // Get the client
 
@@ -63,10 +64,20 @@ export const generateResponse = async (
                 model: "gemini-2.5-flash", 
                 contents: contents,
                 config: {
-                    systemInstruction: getSystemInstruction() // Call the function here
+                    systemInstruction: getSystemInstruction(), // Call the function here
+                    tools: [{googleSearch: {}}], // Add Google Search grounding
                 }
             });
-            return response.text; // Success
+
+            const groundingUrls: {uri: string; title?: string}[] = [];
+            if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+                for (const chunk of response.candidates[0].groundingMetadata.groundingChunks) {
+                    if (chunk.web?.uri) {
+                        groundingUrls.push({ uri: chunk.web.uri, title: chunk.web.title });
+                    }
+                }
+            }
+            return { text: response.text, groundingUrls: groundingUrls.length > 0 ? groundingUrls : undefined }; // Success
         } catch (error: any) {
             const errorMessage = error.toString();
             // Check for retriable errors: 503 (Unavailable/Overloaded), 429 (Resource Exhausted)
@@ -89,14 +100,14 @@ export const generateResponse = async (
             // For other errors or max retries reached, handle and return error message
             console.error("Error generating response from Gemini:", error);
             if (isRetriableError) { // If it was a retriable error but retries failed
-                return "API_ERROR: Le service est actuellement surchargé ou temporairement indisponible. Veuillez patienter quelques instants avant de réessayer.";
+                throw new Error("API_ERROR: Le service est actuellement surchargé ou temporairement indisponible. Veuillez patienter quelques instants avant de réessayer.");
             }
-            return "API_ERROR: Désolé, une erreur de communication inattendue s'est produite. Veuillez réessayer.";
+            throw new Error("API_ERROR: Désolé, une erreur de communication inattendue s'est produite. Veuillez réessayer.");
         }
     }
     
     // This should not be reached, but as a fallback.
-    return "API_ERROR: Échec de la communication après plusieurs tentatives.";
+    throw new Error("API_ERROR: Échec de la communication après plusieurs tentatives.");
 };
 
 /**
@@ -133,7 +144,7 @@ export const analyzeVideo = async (videoFile: File, question: string): Promise<s
     const videoPart = await videoFileToGenerativePart(videoFile);
 
     try {
-        const response: GenerateContentResponse = await aiClient.models.generateContent({
+        const response: GeminiGenerateContentResponse = await aiClient.models.generateContent({
             model: 'gemini-2.5-pro', // Using gemini-2.5-pro for video understanding
             contents: [{ parts: [videoPart, { text: question }] }],
         });
@@ -156,7 +167,7 @@ export const searchDermatologistsWithMaps = async (
     country: string,
     city: string,
     userLatLng?: LatLng | null
-): Promise<GenerateContentResponse> => {
+): Promise<GeminiGenerateContentResponse> => {
     const aiClient = getGeminiClient();
 
     const tools: Tool[] = [{ googleMaps: {} }];

@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Message, GeminiContent, GeminiTextPart, GeminiImagePart, PageConfig } from './types';
 import { generateResponse, fileToGenerativePart } from './services/geminiService'; // Removed analyzeVideo
@@ -49,6 +51,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
     const [awaitingNumberInputForOption, setAwaitingNumberInputForOption] = useState<string | null>(null);
     const [showResetConfirmation, setShowResetConfirmation] = useState(false); // New state for reset confirmation
     const [showInitialWarningPopup, setShowInitialWarningPopup] = useState(true); // State for the initial warning popup
+    const [allGroundingUrls, setAllGroundingUrls] = useState<{uri: string; title?: string}[]>([]); // New state for accumulating grounding URLs
 
     // Removed uploadedVideoFile and awaitingVideoQuestion states
 
@@ -126,7 +129,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
         }
     }, [isLoading, currentAiMessage, awaitingNumberInputForOption, consultationType, showInitialWarningPopup]); // Removed awaitingVideoQuestion from dependencies
 
-    const parseAiResponse = useCallback((text: string, id: string): Message => {
+    const parseAiResponse = useCallback((text: string, id: string, groundingUrls?: {uri: string; title?: string}[]): Message => {
         const photoRequestMatch = text.includes('[PHOTO_REQUEST]');
         const finalReportMatch = text.includes('[FINAL_REPORT]');
         // Updated regex to capture optional none button text
@@ -179,7 +182,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
 
             let tempOptions: string[] = [];
             let tempHasNoneButton = false;
-            let tempNoneButtonText: string | undefined;
+            let tempNoneButtonText = undefined;
 
             for (const opt of rawOptions) {
                 if (noneKeywords.includes(opt)) {
@@ -201,7 +204,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
 
             let tempOptions: string[] = [];
             let tempHasNoneButton = false;
-            let tempNoneButtonText: string | undefined;
+            let tempNoneButtonText = undefined;
 
             for (const opt of rawOptions) {
                 if (noneKeywords.includes(opt)) {
@@ -242,6 +245,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
             // If TEXT_INPUT_WITH_NONE, `hasNoneButton` is true and `noneButtonText` comes from the tag
             hasNoneButton: hasNoneButton || isTextInputWithNone, 
             noneButtonText: noneButtonTextForTextInput || noneButtonText, 
+            groundingUrls: groundingUrls, // Pass grounding URLs
             // Removed: isQuestionForVideoAnalysis: false, // Default to false
         };
     }, [setIsGameOver]);
@@ -272,29 +276,35 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
         setConsultationType(null);
         setAwaitingNumberInputForOption(null); // Reset this state too
         setShowResetConfirmation(false); // Hide reset confirmation
+        setAllGroundingUrls([]); // Reset grounding URLs
         // Removed uploadedVideoFile and awaitingVideoQuestion resets
 
         try {
             // Initial prompt to start the conversation, letting the AI generate the first question
             const initialUserPrompt = "Démarrer la consultation.";
-            const aiResponseText = await generateResponse([], initialUserPrompt);
+            const aiResponse = await generateResponse([], initialUserPrompt);
 
-            if (aiResponseText.startsWith("API_ERROR:")) {
-                setError(aiResponseText.replace("API_ERROR:", "").trim());
+            if (aiResponse.text.startsWith("API_ERROR:")) {
+                setError(aiResponse.text.replace("API_ERROR:", "").trim());
                 setLastFailedAction({ userText: initialUserPrompt });
                 setIsLoading(false);
                 return;
             }
 
-            const initialAiMessage = parseAiResponse(aiResponseText, `ai-initial-${Date.now()}`);
+            // Accumulate grounding URLs from the initial response
+            if (aiResponse.groundingUrls) {
+                setAllGroundingUrls(aiResponse.groundingUrls);
+            }
+
+            const initialAiMessage = parseAiResponse(aiResponse.text, `ai-initial-${Date.now()}`, aiResponse.groundingUrls);
             setCurrentAiMessage(initialAiMessage);
             setApiHistory([
                 { role: 'user', parts: [{ text: initialUserPrompt }] },
-                { role: 'model', parts: [{ text: aiResponseText }] }
+                { role: 'model', parts: [{ text: aiResponse.text }] }
             ]);
-        } catch (err) {
+        } catch (err: any) { // Catch the error thrown by generateResponse
             console.error("Failed to initialize app with AI:", err);
-            setError("Impossible de démarrer la consultation. Veuillez vérifier votre connexion.");
+            setError(err.message.replace("API_ERROR:", "").trim() || "Impossible de démarrer la consultation. Veuillez vérifier votre connexion.");
         } finally {
             setIsLoading(false);
         }
@@ -416,6 +426,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
             ageDropdownMax: undefined,
             hasNoneButton: false, // Clear none button state
             noneButtonText: undefined, // Clear none button text
+            groundingUrls: undefined, // Clear grounding URLs for the *current* message
             // Removed: isQuestionForVideoAnalysis: false, // Clear video analysis question flag
         } : null);
 
@@ -430,16 +441,30 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
             { role: 'user', parts: userParts }
         ];
 
-        const aiResponseText = await generateResponse(newApiHistory, actualUserTextToSend, imageFiles); // Removed videoFile
-
-        if (aiResponseText.startsWith("API_ERROR:")) {
-            setError(aiResponseText.replace("API_ERROR:", "").trim());
+        let aiResponse;
+        try {
+            aiResponse = await generateResponse(newApiHistory, actualUserTextToSend, imageFiles); // Removed videoFile
+        } catch (err: any) { // Catch the error thrown by generateResponse
+            setError(err.message.replace("API_ERROR:", "").trim());
             setLastFailedAction({ userText: actualUserTextToSend, imageFiles: imageFiles }); // Removed videoFile
             setIsLoading(false);
             return;
         }
+        
 
-        const newAiMessage = parseAiResponse(aiResponseText, `ai-${Date.now()}`);
+        // Accumulate grounding URLs
+        if (aiResponse.groundingUrls) {
+            setAllGroundingUrls(prev => {
+                // Filter out duplicates based on URI
+                const newUrls = aiResponse.groundingUrls?.filter(newUrl => 
+                    !prev.some(existingUrl => existingUrl.uri === newUrl.uri)
+                ) || [];
+                return [...prev, ...newUrls];
+            });
+        }
+
+
+        const newAiMessage = parseAiResponse(aiResponse.text, `ai-${Date.now()}`, aiResponse.groundingUrls);
 
         // If this is the final report, collect all user-uploaded images from history
         if (newAiMessage.isFinalReport) {
@@ -454,15 +479,16 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
                 }
             }
             newAiMessage.userUploadedImageUrls = allUploadedImageUrls;
+            newAiMessage.groundingUrls = allGroundingUrls; // Add all collected grounding URLs to the final report message
         }
 
         setApiHistory([
             ...newApiHistory,
-            { role: 'model', parts: [{ text: aiResponseText }] }
+            { role: 'model', parts: [{ text: aiResponse.text }] }
         ]);
         setCurrentAiMessage(newAiMessage);
         setIsLoading(false);
-    }, [apiHistory, parseAiResponse, currentAiMessage, consultationType, setConsultationType, generateResponse]); // Removed uploadedVideoFile, analyzeVideo
+    }, [apiHistory, parseAiResponse, currentAiMessage, consultationType, setConsultationType, generateResponse, allGroundingUrls]); // Removed uploadedVideoFile, analyzeVideo
     
     const retryLastAction = useCallback(() => {
         if (lastFailedAction) {
@@ -575,6 +601,7 @@ const Questionnaire: React.FC<QuestionnaireProps> = ({ config }) => {
         setApiHistory(newApiHistory);
         setError(null);
         setLastFailedAction(null);
+        setAllGroundingUrls(prevUrls => prevUrls.slice(0, -1)); // Remove the last set of grounding URLs
 
         const lastModelContent = newApiHistory[newApiHistory.length - 1];
         
